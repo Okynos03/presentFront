@@ -1,211 +1,405 @@
 "use client";
-import { useState, useEffect } from "react";
-import { Calendar, Users, Plus, X, Loader2, BookOpen, Search, Info } from "lucide-react";
-import { getExposiciones, createExposicion, getEquipos, getRubricas } from "@/lib/api";
+
+import { useState } from "react";
+import { useExposiciones } from "@/features/exposiciones/hooks/useExposiciones";
+import { ExposicionInput, EstadoExpo } from "@/lib/types";
+import { useToast } from "@/components/ui/Toast";
+import { Plus, Pencil, Trash2, Presentation } from "lucide-react";
 
 export default function ExposicionesPage() {
-  // 1. ESTADOS PARA HIDRATACIÓN Y DATOS
-  const [mounted, setMounted] = useState(false);
-  const [expos, setExpos] = useState<any[]>([]);
-  const [equipos, setEquipos] = useState<any[]>([]);
-  const [rubricas, setRubricas] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Estados para el Modal y Formulario
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [formData, setFormData] = useState({
+  const { addToast } = useToast();
+  const [page, setPage] = useState(0);
+  const [size] = useState(10);
+  const [showModal, setShowModal] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formData, setFormData] = useState<ExposicionInput>({
+    titulo: "",
+    id_equipo: 0,
+    id_rubrica: 0,
+    fecha_inicio: "",
+    fecha_fin: "",
+  });
+  const [formErrors, setFormErrors] = useState({
     titulo: "",
     id_equipo: "",
     id_rubrica: "",
     fecha_inicio: "",
-    fecha_fin: ""
+    fecha_fin: "",
   });
 
-  // 2. EFECTO INICIAL
-  useEffect(() => {
-    setMounted(true);
-    cargarDatos();
-  }, []);
+  const { data, loading, createExposicion, updateExposicion, removeExposicion, changeEstado } = useExposiciones(page, size);
 
-  const cargarDatos = async () => {
-    setLoading(true);
+  const validate = () => {
+    let valid = true;
+    const errors = { titulo: "", id_equipo: "", id_rubrica: "", fecha_inicio: "", fecha_fin: "" };
+
+    if (!formData.titulo.trim()) {
+      errors.titulo = "El título es requerido";
+      valid = false;
+    }
+    if (!formData.id_equipo) {
+      errors.id_equipo = "El equipo es requerido";
+      valid = false;
+    }
+    if (!formData.id_rubrica) {
+      errors.id_rubrica = "La rúbrica es requerida";
+      valid = false;
+    }
+    if (!formData.fecha_inicio) {
+      errors.fecha_inicio = "La fecha de inicio es requerida";
+      valid = false;
+    }
+    if (!formData.fecha_fin) {
+      errors.fecha_fin = "La fecha de fin es requerida";
+      valid = false;
+    }
+
+    setFormErrors(errors);
+    return valid;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setSubmitting(true);
     try {
-      // Cargamos todo lo necesario para el formulario y la vista
-      const [exposData, equiposData, rubricasData] = await Promise.all([
-        getExposiciones(),
-        getEquipos(),
-        getRubricas()
-      ]);
-      setExpos(exposData);
-      setEquipos(equiposData);
-      setRubricas(rubricasData);
-    } catch (error) {
-      console.error("Error cargando exposiciones:", error);
+      if (isEditing && selectedId) {
+        await updateExposicion(selectedId, formData);
+        addToast("Exposición actualizada correctamente", "success");
+      } else {
+        await createExposicion(formData);
+        addToast("Exposición creada correctamente", "success");
+      }
+      setShowModal(false);
+      resetForm();
+    } catch (err: any) {
+      const message = err.response?.data?.message || "Error al guardar exposición";
+      addToast(message, "error");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  // 3. LÓGICA DE GUARDADO (POST)
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGuardando(true);
+  const handleEdit = (exposicion: any) => {
+    setFormData({
+      titulo: exposicion.titulo,
+      id_equipo: exposicion.id_equipo,
+      id_rubrica: exposicion.id_rubrica,
+      fecha_inicio: exposicion.fecha_inicio,
+      fecha_fin: exposicion.fecha_fin,
+    });
+    setSelectedId(exposicion.id_exposicion);
+    setIsEditing(true);
+    setShowModal(true);
+  };
+
+  const handleDeleteConfirm = (id: number) => {
+    setSelectedId(id);
+    setShowConfirm(true);
+  };
+
+  const handleDelete = async () => {
+    if (!selectedId) return;
     try {
-      await createExposicion({
-        titulo: formData.titulo,
-        id_equipo: parseInt(formData.id_equipo),
-        id_rubrica: parseInt(formData.id_rubrica),
-        fecha_inicio: formData.fecha_inicio,
-        fecha_fin: formData.fecha_fin
-      });
-      
-      setIsModalOpen(false);
-      setFormData({ titulo: "", id_equipo: "", id_rubrica: "", fecha_inicio: "", fecha_fin: "" });
-      await cargarDatos(); // Refrescar la lista
-      alert("Exposición programada con éxito");
-    } catch (error: any) {
-      alert("Error al guardar: " + error.message);
+      await removeExposicion(selectedId);
+      addToast("Exposición eliminada correctamente", "success");
+    } catch (err: any) {
+      addToast("Error al eliminar exposición", "error");
     } finally {
-      setGuardando(false);
+      setShowConfirm(false);
+      setSelectedId(null);
     }
   };
 
-  // 4. PARCHE DE HIDRATACIÓN
-  if (!mounted) return null;
+  const handleChangeEstado = async (id: number, estadoActual: EstadoExpo) => {
+    const nuevoEstado: EstadoExpo = estadoActual === "ABIERTA" ? "CERRADA" : "ABIERTA";
+    try {
+      await changeEstado(id, nuevoEstado);
+      addToast(`Exposición ${nuevoEstado === "ABIERTA" ? "abierta" : "cerrada"} correctamente`, "success");
+    } catch (err: any) {
+      addToast("Error al cambiar estado", "error");
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({ titulo: "", id_equipo: 0, id_rubrica: 0, fecha_inicio: "", fecha_fin: "" });
+    setFormErrors({ titulo: "", id_equipo: "", id_rubrica: "", fecha_inicio: "", fecha_fin: "" });
+    setIsEditing(false);
+    setSelectedId(null);
+  };
 
   return (
-    <div className="w-full text-white">
-      {/* HEADER */}
-      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Exposiciones</h1>
-          <p className="text-zinc-400">Panel de control y programación de presentaciones.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Exposiciones</h1>
+          <p className="text-muted-foreground">Gestión de exposiciones del sistema.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-all font-medium shadow-lg shadow-blue-900/20"
+        <button
+          onClick={() => { resetForm(); setShowModal(true); }}
+          className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-all"
         >
-          <Plus size={20} /> Programar Exposición
+          <Plus size={18} />
+          <span className="hidden sm:inline">Nueva Exposición</span>
+          <span className="sm:hidden">Nueva</span>
         </button>
       </div>
 
-      {/* CONTENIDO PRINCIPAL */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center p-20 text-zinc-500">
-          <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
-          <p>Cargando exposiciones...</p>
-        </div>
-      ) : expos.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-20 bg-zinc-900/20 border border-dashed border-zinc-800 rounded-3xl text-zinc-500">
-          <Calendar size={48} className="mb-4 opacity-20" />
-          <p>No hay exposiciones programadas.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {expos.map((expo) => (
-            <div key={expo.id_exposicion} className="group bg-zinc-900/40 border border-zinc-800 p-6 rounded-2xl hover:border-blue-500/50 transition-all relative overflow-hidden">
-              <div className="flex justify-between items-start mb-4">
-                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${expo.estado === 'ABIERTA' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-zinc-800 text-zinc-500'}`}>
-                  {expo.estado}
-                </span>
-                <div className="text-xs text-zinc-500 flex items-center gap-1">
-                  <Calendar size={12} /> {new Date(expo.fecha_inicio).toLocaleDateString()}
-                </div>
-              </div>
+      {/* Tabla desktop */}
+      <div className="hidden md:block rounded-xl border border-border glass bg-background/50 overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Título</th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Estado</th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Fecha inicio</th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Fecha fin</th>
+              <th className="text-right p-4 text-sm font-medium text-muted-foreground">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} className="border-b border-border animate-pulse">
+                  <td className="p-4"><div className="h-4 w-40 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-20 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-24 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-24 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-16 bg-muted rounded ml-auto" /></td>
+                </tr>
+              ))
+            ) : data?.content.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="p-12 text-center">
+                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <Presentation size={40} className="opacity-30" />
+                    <p>No hay exposiciones registradas aún.</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              data?.content.map((exposicion) => (
+                <tr key={exposicion.id_exposicion} className="border-b border-border hover:bg-secondary/20 transition-colors">
+                  <td className="p-4 font-medium">{exposicion.titulo}</td>
+                  <td className="p-4">
+                    <button
+                      onClick={() => handleChangeEstado(exposicion.id_exposicion, exposicion.estado)}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-all ${
+                        exposicion.estado === "ABIERTA"
+                          ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                          : "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                      }`}
+                    >
+                      {exposicion.estado}
+                    </button>
+                  </td>
+                  <td className="p-4 text-muted-foreground text-sm">{exposicion.fecha_inicio}</td>
+                  <td className="p-4 text-muted-foreground text-sm">{exposicion.fecha_fin}</td>
+                  <td className="p-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleEdit(exposicion)} className="p-2 hover:bg-primary/10 text-primary rounded-lg transition-colors">
+                        <Pencil size={16} />
+                      </button>
+                      <button onClick={() => handleDeleteConfirm(exposicion.id_exposicion)} className="p-2 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
-              <h3 className="text-xl font-bold mb-4 line-clamp-2">{expo.titulo}</h3>
-
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center gap-3 text-sm text-zinc-400">
-                  <Users size={16} className="text-blue-500" />
-                  <span>Equipo ID: <b className="text-zinc-200">{expo.id_equipo}</b></span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-400">
-                  <BookOpen size={16} className="text-zinc-500" />
-                  <span>Rúbrica ID: {expo.id_rubrica}</span>
-                </div>
-              </div>
-
-              <button className="w-full bg-zinc-800 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-all">
-                Ver Detalles
-              </button>
+      {/* Tarjetas móvil */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          [...Array(3)].map((_, i) => (
+            <div key={i} className="p-4 rounded-xl border border-border glass bg-background/50 animate-pulse space-y-2">
+              <div className="h-4 w-40 bg-muted rounded" />
+              <div className="h-4 w-24 bg-muted rounded" />
             </div>
-          ))}
+          ))
+        ) : data?.content.length === 0 ? (
+          <div className="p-12 text-center rounded-xl border border-border glass bg-background/50">
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <Presentation size={40} className="opacity-30" />
+              <p>No hay exposiciones registradas aún.</p>
+            </div>
+          </div>
+        ) : (
+          data?.content.map((exposicion) => (
+            <div key={exposicion.id_exposicion} className="p-4 rounded-xl border border-border glass bg-background/50">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="font-medium">{exposicion.titulo}</p>
+                  <button
+                    onClick={() => handleChangeEstado(exposicion.id_exposicion, exposicion.estado)}
+                    className={`mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                      exposicion.estado === "ABIERTA"
+                        ? "bg-green-500/10 text-green-400"
+                        : "bg-red-500/10 text-red-400"
+                    }`}
+                  >
+                    {exposicion.estado}
+                  </button>
+                  <p className="text-xs text-muted-foreground mt-1">{exposicion.fecha_inicio} → {exposicion.fecha_fin}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handleEdit(exposicion)} className="p-2 hover:bg-primary/10 text-primary rounded-lg transition-colors">
+                    <Pencil size={16} />
+                  </button>
+                  <button onClick={() => handleDeleteConfirm(exposicion.id_exposicion)} className="p-2 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Paginación */}
+      {data && data.totalPages > 1 && (
+        <div className="p-4 flex items-center justify-between border-t border-border">
+          <span className="text-sm text-muted-foreground">
+            Página {page + 1} de {data.totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="px-3 py-1 rounded-lg border border-border hover:bg-secondary/50 disabled:opacity-50 disabled:pointer-events-none transition-all text-sm"
+            >
+              Anterior
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(data.totalPages - 1, p + 1))}
+              disabled={page === data.totalPages - 1}
+              className="px-3 py-1 rounded-lg border border-border hover:bg-secondary/50 disabled:opacity-50 disabled:pointer-events-none transition-all text-sm"
+            >
+              Siguiente
+            </button>
+          </div>
         </div>
       )}
 
-      {/* MODAL PARA CREAR EXPOSICIÓN */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex justify-center items-center z-50 p-4">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl w-full max-w-lg shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">Programar Exposición</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-zinc-500 hover:text-white"><X size={24} /></button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Modal crear/editar */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="glass bg-background/95 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-6">
+              {isEditing ? "Editar Exposición" : "Nueva Exposición"}
+            </h2>
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-1">Título de la Exposición</label>
-                <input 
-                  type="text" required
-                  placeholder="Ej. Implementación de Microservicios"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-white outline-none focus:border-blue-500"
-                  onChange={(e) => setFormData({...formData, titulo: e.target.value})}
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">Título</label>
+                <input
+                  type="text"
+                  value={formData.titulo}
+                  onChange={(e) => setFormData(prev => ({ ...prev, titulo: e.target.value }))}
+                  placeholder="ej. Exposición Parcial 1"
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.titulo ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
                 />
+                {formErrors.titulo && <p className="text-red-400 text-xs mt-1">{formErrors.titulo}</p>}
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Equipo</label>
-                  <select 
-                    required
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-white outline-none focus:border-blue-500"
-                    onChange={(e) => setFormData({...formData, id_equipo: e.target.value})}
-                  >
-                    <option value="">Seleccionar...</option>
-                    {equipos.map(eq => <option key={eq.id_equipo} value={eq.id_equipo}>{eq.nombre_equipo}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Rúbrica</label>
-                  <select 
-                    required
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-white outline-none focus:border-blue-500"
-                    onChange={(e) => setFormData({...formData, id_rubrica: e.target.value})}
-                  >
-                    <option value="">Seleccionar...</option>
-                    {rubricas.map(r => <option key={r.id_rubrica} value={r.id_rubrica}>{r.nombre}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">ID Equipo</label>
+                <input
+                  type="number"
+                  value={formData.id_equipo || ""}
+                  onChange={(e) => setFormData(prev => ({ ...prev, id_equipo: Number(e.target.value) }))}
+                  placeholder="ej. 1"
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.id_equipo ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
+                />
+                {formErrors.id_equipo && <p className="text-red-400 text-xs mt-1">{formErrors.id_equipo}</p>}
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Fecha Inicio</label>
-                  <input 
-                    type="date" required
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-white outline-none focus:border-blue-500"
-                    onChange={(e) => setFormData({...formData, fecha_inicio: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Fecha Fin</label>
-                  <input 
-                    type="date" required
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-white outline-none focus:border-blue-500"
-                    onChange={(e) => setFormData({...formData, fecha_fin: e.target.value})}
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">ID Rúbrica</label>
+                <input
+                  type="number"
+                  value={formData.id_rubrica || ""}
+                  onChange={(e) => setFormData(prev => ({ ...prev, id_rubrica: Number(e.target.value) }))}
+                  placeholder="ej. 1"
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.id_rubrica ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
+                />
+                {formErrors.id_rubrica && <p className="text-red-400 text-xs mt-1">{formErrors.id_rubrica}</p>}
               </div>
-
-              <button 
-                type="submit" disabled={guardando}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl mt-4 transition-all disabled:opacity-50"
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">Fecha inicio</label>
+                <input
+                  type="date"
+                  value={formData.fecha_inicio}
+                  onChange={(e) => setFormData(prev => ({ ...prev, fecha_inicio: e.target.value }))}
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.fecha_inicio ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
+                />
+                {formErrors.fecha_inicio && <p className="text-red-400 text-xs mt-1">{formErrors.fecha_inicio}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">Fecha fin</label>
+                <input
+                  type="date"
+                  value={formData.fecha_fin}
+                  onChange={(e) => setFormData(prev => ({ ...prev, fecha_fin: e.target.value }))}
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.fecha_fin ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
+                />
+                {formErrors.fecha_fin && <p className="text-red-400 text-xs mt-1">{formErrors.fecha_fin}</p>}
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowModal(false); resetForm(); }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border hover:bg-secondary/50 transition-all"
               >
-                {guardando ? "Guardando..." : "Confirmar Programación"}
+                Cancelar
               </button>
-            </form>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground transition-all disabled:opacity-70 disabled:pointer-events-none"
+              >
+                {submitting ? "Guardando..." : isEditing ? "Actualizar" : "Crear"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmación eliminar */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="glass bg-background/95 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-border">
+            <h2 className="text-xl font-bold mb-2">Eliminar Exposición</h2>
+            <p className="text-muted-foreground mb-6">
+              ¿Estás seguro de que deseas eliminar esta exposición? Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowConfirm(false); setSelectedId(null); }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border hover:bg-secondary/50 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-all"
+              >
+                Eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}
