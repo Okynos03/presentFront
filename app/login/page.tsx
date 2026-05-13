@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
-import { saveAuthData } from "@/lib/auth";
+import { authService } from "@/lib/auth";
+import api from "@/lib/api";
+import { LoginResponse } from "@/lib/types";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,31 +45,19 @@ export default function LoginPage() {
     if (!validate()) return;
 
     setIsLoading(true);
-    
-    // Simulate API call for the skeleton
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Simulate validation error for testing error handling
-      if (formData.username === "error") {
-        throw new Error("Credenciales inválidas. Intente con otro usuario.");
-      }
-
-      // Mock successful login
-      const mockUser = {
-        id_usuario: 1,
+      const response = await api.post<LoginResponse>('/auth/login', {
         username: formData.username,
-        email: `${formData.username}@example.com`,
-        nombre: "Usuario Demo",
-        id_rol: formData.username.includes("admin") ? 1 : 2, // 1: Admin, 2: Alumno
-      };
-      const mockToken = "mock_jwt_token_12345";
+        password: formData.password,
+      });
 
-      saveAuthData(mockToken, mockUser);
+      authService.setToken(response.data.token);
       addToast("Inicio de sesión exitoso", "success");
       router.push("/dashboard");
     } catch (err: any) {
-      addToast(err.message || "Ocurrió un error al iniciar sesión", "error");
+      const message = err.response?.data?.message || "Credenciales inválidas";
+      addToast(message, "error");
     } finally {
       setIsLoading(false);
     }
@@ -75,7 +65,6 @@ export default function LoginPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    // Clear error when user types
     if (errors[e.target.name as keyof typeof errors]) {
       setErrors(prev => ({ ...prev, [e.target.name]: "" }));
     }
@@ -83,15 +72,13 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden bg-background">
-      {/* Background gradients */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-primary/20 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-500/20 blur-[120px] pointer-events-none" />
 
       <div className="w-full max-w-md animate-in fade-in slide-in-from-bottom-8 duration-700">
         <div className="glass rounded-2xl p-8 sm:p-10 shadow-2xl relative overflow-hidden">
-          {/* Shine effect */}
           <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/0 translate-x-[-100%] animate-[shimmer_3s_infinite]" />
-          
+
           <div className="mb-8 text-center">
             <div className="w-16 h-16 bg-primary/20 rounded-2xl mx-auto mb-4 flex items-center justify-center border border-primary/30 shadow-[0_0_15px_rgba(59,130,246,0.5)]">
               <span className="text-3xl">📽️</span>
@@ -171,10 +158,6 @@ export default function LoginPage() {
               </button>
             </div>
           </form>
-          
-          <div className="mt-8 text-center text-xs text-muted-foreground/60">
-            <p>Hint: Escribe 'error' en usuario para simular fallo.</p>
-          </div>
         </div>
       </div>
     </div>

@@ -1,156 +1,163 @@
 "use client";
-import { useState, useEffect } from "react";
-import { Plus, Trash2, Edit, X, Loader2, Users } from "lucide-react";
-import { getEquipos, createEquipo, deleteEquipo, getGrupos } from "@/lib/api";
+
+import { useState } from "react";
+import { useEquipos } from "@/features/equipos/hooks/useEquipos";
+import { useGrupos } from "@/features/grupos/hooks/useGrupos";
+import { EquipoInput } from "@/lib/types";
+import { useToast } from "@/components/ui/Toast";
+import { Plus, Pencil, Trash2, Users } from "lucide-react";
 
 export default function EquiposPage() {
-  // 1. ESTADOS
-  const [mounted, setMounted] = useState(false);
-  const [equipos, setEquipos] = useState<any[]>([]);
-  const [grupos, setGrupos] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Estados para el Modal y Formulario
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [formData, setFormData] = useState({ 
-    nombre_equipo: "", 
-    id_grupo: "" 
-  });
+  const { addToast } = useToast();
+  const [page, setPage] = useState(0);
+  const [size] = useState(10);
+  const [showModal, setShowModal] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formData, setFormData] = useState<EquipoInput>({ nombre_equipo: "", id_grupo: 0 });
+  const [formErrors, setFormErrors] = useState({ nombre_equipo: "", id_grupo: "" });
 
-  // 2. EFECTO DE MONTAJE (Parche para el error de hidratación)
-  useEffect(() => {
-    setMounted(true);
-    cargarDatos();
-  }, []);
+  const { data, loading, createEquipo, updateEquipo, removeEquipo } = useEquipos(page, size);
+  const { data: gruposData } = useGrupos(0, 100);
 
-  // 3. CARGA DE DATOS DESDE LA API
-  const cargarDatos = async () => {
-    setLoading(true);
+  const validate = () => {
+    let valid = true;
+    const errors = { nombre_equipo: "", id_grupo: "" };
+    if (!formData.nombre_equipo.trim()) {
+      errors.nombre_equipo = "El nombre es requerido";
+      valid = false;
+    }
+    if (!formData.id_grupo) {
+      errors.id_grupo = "El grupo es requerido";
+      valid = false;
+    }
+    setFormErrors(errors);
+    return valid;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setSubmitting(true);
     try {
-      // Cargamos equipos y grupos al mismo tiempo
-      const [equiposData, gruposData] = await Promise.all([
-        getEquipos(), 
-        getGrupos()
-      ]);
-      setEquipos(equiposData);
-      setGrupos(gruposData);
-    } catch (error) {
-      console.error("Error al cargar datos:", error);
+      if (isEditing && selectedId) {
+        await updateEquipo(selectedId, formData);
+        addToast("Equipo actualizado correctamente", "success");
+      } else {
+        await createEquipo(formData);
+        addToast("Equipo creado correctamente", "success");
+      }
+      setShowModal(false);
+      resetForm();
+    } catch (err: any) {
+      const message = err.response?.data?.message || "Error al guardar equipo";
+      addToast(message, "error");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  // 4. LÓGICA DE GUARDADO
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.id_grupo) return alert("Debes seleccionar un grupo");
+  const handleEdit = (equipo: any) => {
+    setFormData({ nombre_equipo: equipo.nombre_equipo, id_grupo: equipo.id_grupo });
+    setSelectedId(equipo.id_equipo);
+    setIsEditing(true);
+    setShowModal(true);
+  };
 
-    setGuardando(true);
+  const handleDeleteConfirm = (id: number) => {
+    setSelectedId(id);
+    setShowConfirm(true);
+  };
+
+  const handleDelete = async () => {
+    if (!selectedId) return;
     try {
-      await createEquipo({
-        nombre_equipo: formData.nombre_equipo,
-        id_grupo: parseInt(formData.id_grupo),
-      });
-      
-      // Limpiar y cerrar
-      setIsModalOpen(false);
-      setFormData({ nombre_equipo: "", id_grupo: "" });
-      
-      // Recargar la lista
-      await cargarDatos();
-      alert("Equipo creado correctamente");
-    } catch (error: any) {
-      alert("Error al crear equipo: " + error.message);
+      await removeEquipo(selectedId);
+      addToast("Equipo eliminado correctamente", "success");
+    } catch (err: any) {
+      addToast("Error al eliminar equipo", "error");
     } finally {
-      setGuardando(false);
+      setShowConfirm(false);
+      setSelectedId(null);
     }
   };
 
-  // 5. LÓGICA DE ELIMINACIÓN
-  const handleDelete = async (id: number) => {
-    if (!confirm("¿Estás seguro de eliminar este equipo?")) return;
-
-    try {
-      await deleteEquipo(id);
-      setEquipos(equipos.filter((e) => e.id_equipo !== id));
-    } catch (error) {
-      alert("No se pudo eliminar el equipo. Verifica si tiene dependencias.");
-    }
+  const resetForm = () => {
+    setFormData({ nombre_equipo: "", id_grupo: 0 });
+    setFormErrors({ nombre_equipo: "", id_grupo: "" });
+    setIsEditing(false);
+    setSelectedId(null);
   };
 
-  // 6. EVITAR RENDERIZADO EN SERVIDOR (Hydration Fix)
-  if (!mounted) return null;
+  const getGrupoNombre = (id_grupo: number) => {
+    return gruposData?.content.find(g => g.id_grupo === id_grupo)?.nombre_grupo || "Desconocido";
+  };
 
   return (
-    <div className="w-full text-white">
-      {/* HEADER */}
-      <div className="mb-8 flex justify-between items-center">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Equipos</h1>
-          <p className="text-zinc-400">Gestión de equipos registrados en el sistema.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Equipos</h1>
+          <p className="text-muted-foreground">Gestión de equipos del sistema.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-900/20"
+        <button
+          onClick={() => { resetForm(); setShowModal(true); }}
+          className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-all"
         >
-          <Plus size={20} /> Nuevo Equipo
+          <Plus size={18} />
+          <span className="hidden sm:inline">Nuevo Equipo</span>
+          <span className="sm:hidden">Nuevo</span>
         </button>
       </div>
 
-      {/* TABLA DE DATOS */}
-      <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
-        <table className="w-full text-left">
-          <thead className="bg-zinc-800/50 border-b border-zinc-800 text-zinc-300">
-            <tr>
-              <th className="p-4 font-semibold">ID</th>
-              <th className="p-4 font-semibold">Nombre del Equipo</th>
-              <th className="p-4 font-semibold">Grupo</th>
-              <th className="p-4 text-center font-semibold">Acciones</th>
+      {/* Tabla desktop */}
+      <div className="hidden md:block rounded-xl border border-border glass bg-background/50 overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Nombre</th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Grupo</th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">Jefe</th>
+              <th className="text-right p-4 text-sm font-medium text-muted-foreground">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/50">
+          <tbody>
             {loading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} className="border-b border-border animate-pulse">
+                  <td className="p-4"><div className="h-4 w-32 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-24 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-24 bg-muted rounded" /></td>
+                  <td className="p-4"><div className="h-4 w-16 bg-muted rounded ml-auto" /></td>
+                </tr>
+              ))
+            ) : data?.content.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-20 text-center">
-                  <div className="flex flex-col items-center gap-2 text-zinc-500">
-                    <Loader2 className="animate-spin text-blue-500" size={32} />
-                    <span>Cargando equipos...</span>
+                <td colSpan={4} className="p-12 text-center">
+                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <Users size={40} className="opacity-30" />
+                    <p>No hay equipos registrados aún.</p>
                   </div>
                 </td>
               </tr>
-            ) : equipos.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="p-20 text-center text-zinc-500">
-                  No hay equipos registrados todavía.
-                </td>
-              </tr>
             ) : (
-              equipos.map((e) => (
-                <tr key={e.id_equipo} className="hover:bg-zinc-800/30 transition-colors group">
-                  <td className="p-4 text-zinc-500 text-sm">#{e.id_equipo}</td>
+              data?.content.map((equipo) => (
+                <tr key={equipo.id_equipo} className="border-b border-border hover:bg-secondary/20 transition-colors">
+                  <td className="p-4 font-medium">{equipo.nombre_equipo}</td>
+                  <td className="p-4 text-muted-foreground">{getGrupoNombre(equipo.id_grupo)}</td>
+                  <td className="p-4 text-muted-foreground">
+                    {equipo.id_jefe ? `ID: ${equipo.id_jefe}` : (
+                      <span className="text-xs text-muted-foreground/50">Sin jefe</span>
+                    )}
+                  </td>
                   <td className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-600/10 flex items-center justify-center text-blue-500">
-                        <Users size={16} />
-                      </div>
-                      <span className="font-medium">{e.nombre_equipo}</span>
-                    </div>
-                  </td>
-                  <td className="p-4 text-zinc-400">
-                    Grupo ID: {e.id_grupo}
-                  </td>
-                  <td className="p-4 text-center">
-                    <div className="flex justify-center gap-2">
-                      <button className="p-2 text-zinc-400 hover:text-white transition-colors">
-                        <Edit size={18} />
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleEdit(equipo)} className="p-2 hover:bg-primary/10 text-primary rounded-lg transition-colors">
+                        <Pencil size={16} />
                       </button>
-                      <button 
-                        onClick={() => handleDelete(e.id_equipo)}
-                        className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={18} />
+                      <button onClick={() => handleDeleteConfirm(equipo.id_equipo)} className="p-2 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors">
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </td>
@@ -161,57 +168,151 @@ export default function EquiposPage() {
         </table>
       </div>
 
-      {/* MODAL PARA NUEVO EQUIPO */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex justify-center items-center z-50 p-4">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">Nuevo Equipo</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-zinc-500 hover:text-white transition-colors">
-                <X size={24} />
-              </button>
+      {/* Tarjetas móvil */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          [...Array(3)].map((_, i) => (
+            <div key={i} className="p-4 rounded-xl border border-border glass bg-background/50 animate-pulse space-y-2">
+              <div className="h-4 w-32 bg-muted rounded" />
+              <div className="h-4 w-24 bg-muted rounded" />
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-2">Nombre del Equipo</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="Ej: Los Ingenieros"
-                  value={formData.nombre_equipo}
-                  onChange={(e) => setFormData({...formData, nombre_equipo: e.target.value})}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                />
+          ))
+        ) : data?.content.length === 0 ? (
+          <div className="p-12 text-center rounded-xl border border-border glass bg-background/50">
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <Users size={40} className="opacity-30" />
+              <p>No hay equipos registrados aún.</p>
+            </div>
+          </div>
+        ) : (
+          data?.content.map((equipo) => (
+            <div key={equipo.id_equipo} className="p-4 rounded-xl border border-border glass bg-background/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{equipo.nombre_equipo}</p>
+                  <p className="text-sm text-muted-foreground">{getGrupoNombre(equipo.id_grupo)}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {equipo.id_jefe ? `Jefe: ${equipo.id_jefe}` : "Sin jefe"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handleEdit(equipo)} className="p-2 hover:bg-primary/10 text-primary rounded-lg transition-colors">
+                    <Pencil size={16} />
+                  </button>
+                  <button onClick={() => handleDeleteConfirm(equipo.id_equipo)} className="p-2 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
+            </div>
+          ))
+        )}
+      </div>
 
+      {/* Paginación */}
+      {data && data.totalPages > 1 && (
+        <div className="p-4 flex items-center justify-between border-t border-border">
+          <span className="text-sm text-muted-foreground">
+            Página {page + 1} de {data.totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="px-3 py-1 rounded-lg border border-border hover:bg-secondary/50 disabled:opacity-50 disabled:pointer-events-none transition-all text-sm"
+            >
+              Anterior
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(data.totalPages - 1, p + 1))}
+              disabled={page === data.totalPages - 1}
+              className="px-3 py-1 rounded-lg border border-border hover:bg-secondary/50 disabled:opacity-50 disabled:pointer-events-none transition-all text-sm"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal crear/editar */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="glass bg-background/95 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border">
+            <h2 className="text-xl font-bold mb-6">
+              {isEditing ? "Editar Equipo" : "Nuevo Equipo"}
+            </h2>
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-2">Asignar a Grupo</label>
-                <select 
-                  required
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">Nombre</label>
+                <input
+                  type="text"
+                  value={formData.nombre_equipo}
+                  onChange={(e) => setFormData(prev => ({ ...prev, nombre_equipo: e.target.value }))}
+                  placeholder="ej. Equipo Alpha"
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.nombre_equipo ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
+                />
+                {formErrors.nombre_equipo && <p className="text-red-400 text-xs mt-1">{formErrors.nombre_equipo}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-foreground/80">Grupo</label>
+                <select
                   value={formData.id_grupo}
-                  onChange={(e) => setFormData({...formData, id_grupo: e.target.value})}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 outline-none focus:border-blue-500 transition-all text-white"
+                  onChange={(e) => setFormData(prev => ({ ...prev, id_grupo: Number(e.target.value) }))}
+                  className={`w-full px-4 py-2.5 rounded-lg bg-input border ${
+                    formErrors.id_grupo ? "border-red-500/50" : "border-border"
+                  } focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
                 >
-                  <option value="">Selecciona un grupo...</option>
-                  {grupos.map((g) => (
-                    <option key={g.id_grupo} value={g.id_grupo}>
-                      {g.nombre_grupo} (ID: {g.id_grupo})
-                    </option>
+                  <option value={0}>Selecciona un grupo</option>
+                  {gruposData?.content.map((grupo) => (
+                    <option key={grupo.id_grupo} value={grupo.id_grupo}>{grupo.nombre_grupo}</option>
                   ))}
                 </select>
+                {formErrors.id_grupo && <p className="text-red-400 text-xs mt-1">{formErrors.id_grupo}</p>}
               </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowModal(false); resetForm(); }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border hover:bg-secondary/50 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground transition-all disabled:opacity-70 disabled:pointer-events-none"
+              >
+                {submitting ? "Guardando..." : isEditing ? "Actualizar" : "Crear"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-              <div className="pt-2">
-                <button 
-                  type="submit" 
-                  disabled={guardando}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {guardando ? "Creando equipo..." : "Registrar Equipo"}
-                </button>
-              </div>
-            </form>
+      {/* Modal confirmación eliminar */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="glass bg-background/95 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-border">
+            <h2 className="text-xl font-bold mb-2">Eliminar Equipo</h2>
+            <p className="text-muted-foreground mb-6">
+              ¿Estás seguro de que deseas eliminar este equipo? Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowConfirm(false); setSelectedId(null); }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border hover:bg-secondary/50 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-all"
+              >
+                Eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}
