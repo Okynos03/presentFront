@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { authService } from '@/lib/auth';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, BookOpen, Users, GraduationCap, UsersRound, Presentation, ClipboardList, LogOut, X } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Users, GraduationCap, UsersRound, Presentation, ClipboardList, LogOut, X, Scroll } from 'lucide-react';
 
 const allMenuItems = [
   { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: [1, 2, 3] },
@@ -12,6 +12,7 @@ const allMenuItems = [
   { name: 'Grupos', path: '/grupos', icon: UsersRound, roles: [1, 3] },
   { name: 'Alumnos', path: '/alumnos', icon: GraduationCap, roles: [1, 3] },
   { name: 'Equipos', path: '/equipos', icon: Users, roles: [1, 2, 3] },
+  { name: 'Rúbricas', path: '/rubricas', icon: Scroll, roles: [1, 3] },
   { name: 'Exposiciones', path: '/exposiciones', icon: Presentation, roles: [1, 2, 3] },
   { name: 'Evaluaciones', path: '/evaluaciones', icon: ClipboardList, roles: [2] },
 ];
