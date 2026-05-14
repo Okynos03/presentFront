@@ -107,11 +107,29 @@ export interface Criterio {
   escala_max: number;
 }
 
+export interface CriterioInput {
+  descripcion: string;
+  ponderacion: number;
+  escala_min?: number;
+  escala_max?: number;
+}
+
 export interface Rubrica {
   id_rubrica: number;
   nombre: string;
-  descripcion: string;
+  descripcion: string | null;
+  publicada: boolean;
+  fecha_creacion: string;
   criterios?: Criterio[];
+}
+
+export interface RubricaInput {
+  nombre: string;
+  descripcion?: string;
+}
+
+export interface RubricaInputWithCriterios extends RubricaInput {
+  criterios?: CriterioInput[];
 }
 
 // Exposiciones
